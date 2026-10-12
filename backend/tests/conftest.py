@@ -36,3 +36,15 @@ def make_user(client):
     with SessionLocal() as db:
         db.execute(delete(User).where(User.email.in_(created)))
         db.commit()
+
+
+
+
+@pytest.fixture(autouse=True)
+def private_evidence_folder(tmp_path, monkeypatch):
+    """Tests never write into the real evidence folder."""
+    from app.core import storage
+
+    root = tmp_path / "evidence"
+    monkeypatch.setattr(storage, "evidence_root", lambda: root)
+    return root

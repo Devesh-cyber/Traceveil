@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.core.security import decode_access_token
 from app.db.session import get_db
-from app.models import Case, User
+from app.models import Case, User, Scan
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login")
 
@@ -41,3 +41,18 @@ def get_owned_case(
     if case is None:
         raise HTTPException(status_code=404, detail="Case not found.")
     return case
+
+def get_owned_scan(
+    scan_id: uuid.UUID,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> Scan:
+    """Return the scan only if its case belongs to the logged-in user (else a plain 404)."""
+    scan = db.scalar(
+        select(Scan)
+        .join(Case, Case.id == Scan.case_id)
+        .where(Scan.id == scan_id, Case.owner_id == user.id)
+    )
+    if scan is None:
+        raise HTTPException(status_code=404, detail="Scan not found.")
+    return scan

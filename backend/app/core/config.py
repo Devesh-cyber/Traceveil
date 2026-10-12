@@ -26,7 +26,12 @@ class Settings(BaseSettings):
     cors_origins: list[str] = ["http://localhost:5173"]
     data_dir: Path = ROOT_DIR / "backend" / ".data"
     access_token_minutes: int = 60
-        # Crawler
+    # Files and jobs
+    retention_days: int = 7
+    max_upload_bytes: int = 10_000_000
+    worker_poll_seconds: float = 2.0
+    scan_dev_targets: list[str] = []  # development only, e.g. ["http://localhost:8001"]
+    # Crawler
     crawler_contact: str = "contact-not-configured"
     crawler_min_delay_seconds: float = 0.5
     crawler_timeout_seconds: float = 12.0
@@ -52,6 +57,8 @@ class Settings(BaseSettings):
             self.netguard_allow_loopback or not self.netguard_enabled
         ):
             raise ValueError("Network guard relaxations are for development only.")
+        if self.environment != "development" and self.scan_dev_targets:
+            raise ValueError("SCAN_DEV_TARGETS is for development only.")
         return self
 
 

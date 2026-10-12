@@ -3,6 +3,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user, get_owned_case
+from app.core import storage
 from app.core.audit import record
 from app.db.session import get_db
 from app.models import Case, User
@@ -46,6 +47,7 @@ def delete_case(
 ) -> None:
     # The audit row keeps the id in its details, because its case link is cleared on delete.
     record(db, "case.deleted", user_id=user.id, deleted_case_id=str(case.id))
+    case_id = case.id
     db.delete(case)  # the database also removes the case's scans, matches and files rows
     db.commit()
-    # Step 7 will also delete the case's evidence files from disk here.
+    storage.delete_case_files(case_id)  # and the files themselves leave the disk
