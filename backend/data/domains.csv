@@ -1,0 +1,4 @@
+# One website per row. Fill this in with sites YOU have researched and checked.
+# media_types: image, video or image|video      last_checked: YYYY-MM-DD
+domain,category,media_types,notes,last_checked
+example.org,placeholder,image|video,replace this row with real sites,2026-10-12
