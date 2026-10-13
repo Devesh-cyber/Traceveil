@@ -156,8 +156,11 @@ class Fetcher:
         max_bytes: int,
         referer: str | None = None,
         check_robots: bool = True,
+        truncate_ok: bool = False,
     ) -> FetchResult:
-        """Download one URL. `accept` lists allowed content-type prefixes, e.g. ("text/html",)."""
+        """Download one URL. `accept` lists allowed content-type prefixes, e.g. ("text/html",).
+        With truncate_ok, a file bigger than max_bytes is not an error: we ask for just the
+        first max_bytes (a Range request) and keep only that part."""
         async with self._semaphore:
             if check_robots:
                 try:
@@ -168,7 +171,9 @@ class Fetcher:
                     reason = rules.detail or "robots.txt disallows this page"
                     status = FetchStatus.unreachable if rules.unreachable else FetchStatus.blocked
                     return FetchResult(status, url, detail=reason)
-            return await self._get(url, accept=accept, max_bytes=max_bytes, referer=referer)
+            return await self._get(
+                url, accept=accept, max_bytes=max_bytes, referer=referer, truncate_ok=truncate_ok
+            )
 
     async def sitemaps_for(self, url: str) -> list[str]:
         """Sitemap addresses the site announces in its robots.txt."""
@@ -180,9 +185,12 @@ class Fetcher:
     # ----------------------------------------------------------------- private
 
     async def _get(
-        self, url: str, *, accept: tuple[str, ...], max_bytes: int, referer: str | None
+        self, url: str, *, accept: tuple[str, ...], max_bytes: int, referer: str | None,
+        truncate_ok: bool = False,
     ) -> FetchResult:
         headers = {"Referer": referer} if referer else {}
+        if truncate_ok:
+            headers["Range"] = f"bytes=0-{max_bytes - 1}"
         try:
             async with self._client.stream("GET", url, headers=headers) as response:
                 final_url = str(response.url)
@@ -201,7 +209,7 @@ class Fetcher:
                     )
 
                 declared = response.headers.get("content-length", "")
-                if declared.isdigit() and int(declared) > max_bytes:
+                if declared.isdigit() and int(declared) > max_bytes and not truncate_ok:
                     return FetchResult(
                         FetchStatus.too_large, url, final_url, response.status_code,
                         content_type, detail="file is larger than the limit",
@@ -211,6 +219,12 @@ class Fetcher:
                 size = 0
                 async for chunk in response.aiter_bytes():
                     size += len(chunk)
+                    if size > max_bytes and truncate_ok:  # keep the start, drop the rest
+                        chunks.append(chunk[: len(chunk) - (size - max_bytes)])
+                        return FetchResult(
+                            FetchStatus.ok, url, final_url, response.status_code,
+                            content_type, b"".join(chunks), detail="truncated",
+                        )
                     if size > max_bytes:  # stop reading; the rest is never downloaded
                         return FetchResult(
                             FetchStatus.too_large, url, final_url, response.status_code,

@@ -51,3 +51,18 @@ def evaluate_candidate(
     if best_result is None:
         return None
     return classify_by_geometry(best_result, best_name, t)
+
+class ImageMatcher:
+    """Compares candidates with one reference image."""
+
+    def __init__(self, reference: Reference) -> None:
+        self.reference = reference
+
+    def compare(self, image: Image.Image) -> MatchDecision | None:
+        return evaluate_candidate(self.reference, image)
+
+
+def as_matcher(reference_or_matcher):
+    """Anything with a .compare(image) method is already a matcher (the video matcher is one);
+    a plain Reference is wrapped."""
+    return reference_or_matcher if hasattr(reference_or_matcher, "compare") else ImageMatcher(reference_or_matcher)

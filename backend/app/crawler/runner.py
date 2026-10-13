@@ -21,7 +21,7 @@ from app.crawler.fetcher import Fetcher, FetchResult, FetchStatus
 from app.crawler.pages import discover_pages
 from app.matching.fingerprint import ImageError, Reference, load_image
 from app.matching.tiers import MatchDecision
-from app.matching.verify import evaluate_candidate
+from app.matching.verify import as_matcher
 from app.models.domain_result import DomainStatus
 
 log = logging.getLogger(__name__)
@@ -128,16 +128,17 @@ class ScanSummary:
 
 
 MatchCallback = Callable[[MatchFound], Awaitable[None]]
+EnrichCallback = Callable[[MatchFound, str], Awaitable[None]]  # (match, the page's HTML)
 SiteCallback = Callable[[SiteOutcome], Awaitable[None]]
 
 
-def _compare_image(reference: Reference, data: bytes) -> MatchDecision | None:
+def _compare_image(matcher, data: bytes) -> MatchDecision | None:
     """Decode and compare one downloaded picture. Runs in a worker thread."""
     try:
         image = load_image(data)
     except ImageError:
         return None
-    return evaluate_candidate(reference, image)
+    return matcher.compare(image)
 
 
 def _homepage_failure(result: FetchResult) -> SiteOutcome:
@@ -155,6 +156,7 @@ async def scan_domain(
     progress: ScanProgress,
     cpu_slots: asyncio.Semaphore,
     on_match: MatchCallback | None = None,
+    enrich: EnrichCallback | None = None,
 ) -> SiteOutcome:
     discovery = await discover_pages(
         fetcher, entry.start_url, limits.max_pages_per_domain, limits.max_html_bytes
@@ -212,6 +214,11 @@ async def scan_domain(
                 found = MatchFound(
                     entry.domain, page_url, image_url, decision, image_bytes=picture.body
                 )
+                if enrich:  # e.g. look for the video on the page and check it
+                    try:
+                        await enrich(found, html)
+                    except Exception:
+                        log.exception("enriching a match on %s failed", entry.domain)
                 outcome.matches.append(found)
                 progress.matches_found += 1
                 if on_match:
@@ -242,8 +249,10 @@ async def run_scan(
     progress: ScanProgress | None = None,
     on_match: MatchCallback | None = None,
     on_site_done: SiteCallback | None = None,
+    enrich: EnrichCallback | None = None,
 ) -> ScanSummary:
     limits = limits or ScanLimits.from_settings()
+    reference = as_matcher(reference)
     progress = progress or ScanProgress()
     progress.sites_total = len(domains)
     budget = ScanBudget(limits)
@@ -257,7 +266,7 @@ async def run_scan(
             else:
                 try:
                     outcome = await scan_domain(
-                        entry, reference, fetcher, budget, limits, progress, cpu_slots, on_match
+                        entry, reference, fetcher, budget, limits, progress, cpu_slots, on_match, enrich
                     )
                 except Exception as exc:  # one broken site must never stop the scan
                     log.exception("scan of %s failed", entry.domain)

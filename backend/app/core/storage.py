@@ -47,6 +47,23 @@ def save_bytes(case_id: uuid.UUID, data: bytes) -> tuple[str, str]:
     return relative, hashlib.sha256(data).hexdigest()
 
 
+def incoming_path() -> Path:
+    """A fresh private file path for an upload that is still being checked."""
+    folder = evidence_root() / ".incoming"
+    folder.mkdir(parents=True, exist_ok=True, mode=0o700)
+    return folder / f"{uuid.uuid4().hex}.part"
+
+
+def adopt_file(case_id: uuid.UUID, source: Path) -> str:
+    """Move a checked upload into its case folder under a random name. Returns the relative path."""
+    folder = case_dir(case_id)
+    folder.mkdir(parents=True, exist_ok=True, mode=0o700)
+    relative = f"{case_id}/{uuid.uuid4().hex}.bin"
+    os.replace(source, resolve(relative))
+    os.chmod(resolve(relative), 0o600)
+    return relative
+
+
 def read_bytes(relative_path: str) -> bytes:
     return resolve(relative_path).read_bytes()
 

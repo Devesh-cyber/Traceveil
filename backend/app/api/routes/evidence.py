@@ -1,4 +1,6 @@
+import hashlib
 import io
+import os
 from datetime import datetime, timedelta, timezone
 from pathlib import PurePosixPath
 
@@ -15,6 +17,7 @@ from app.db.session import get_db
 from app.matching.fingerprint import ImageError, load_image
 from app.models import Case, EvidenceFile, EvidenceKind, Scan, User
 from app.schemas.evidence import EvidenceOut
+from app.video.keyframes import VideoError, extract_keyframes, probe
 
 router = APIRouter(prefix="/cases/{case_id}/evidence", tags=["evidence"])
 
@@ -68,6 +71,66 @@ def upload_reference_image(
     except Exception:
         db.rollback()
         storage.delete_file(relative_path)  # never leave an orphan file behind
+        raise
+    return evidence
+
+
+@router.post("/video", response_model=EvidenceOut, status_code=status.HTTP_201_CREATED)
+def upload_reference_video(
+    file: UploadFile,
+    case: Case = Depends(get_owned_case),
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> EvidenceFile:
+    """Accept a video the user is authorised to use as the reference for a scan.
+
+    It is streamed to a private temporary file (never held in memory), cut off at the size
+    limit, and only moved into the case folder after we have proved that it is a short video
+    with usable frames. Whatever goes wrong, the temporary file is removed."""
+    settings = get_settings()
+    temp = storage.incoming_path()
+    digest, size = hashlib.sha256(), 0
+    try:
+        fd = os.open(temp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        with os.fdopen(fd, "wb") as out:
+            while chunk := file.file.read(1024 * 1024):
+                size += len(chunk)
+                if size > settings.max_video_bytes:
+                    raise HTTPException(413, "File is too large.")
+                digest.update(chunk)
+                out.write(chunk)
+        if size == 0:
+            raise HTTPException(422, "The file is empty.")
+        try:
+            info = probe(temp, settings.max_video_seconds)
+            extract_keyframes(temp, info)  # proves there are real, usable frames
+        except VideoError as exc:
+            raise HTTPException(422, str(exc)) from exc
+        relative_path = storage.adopt_file(case.id, temp)
+    except BaseException:
+        temp.unlink(missing_ok=True)
+        raise
+
+    declared = (file.content_type or "").lower()
+    try:
+        evidence = EvidenceFile(
+            case_id=case.id,
+            kind=EvidenceKind.reference_video,
+            original_filename=_safe_name(file.filename),
+            content_type=declared[:100] if declared.startswith("video/") else "video/unknown",
+            size_bytes=size,
+            sha256=digest.hexdigest(),
+            storage_path=relative_path,
+            delete_after=datetime.now(timezone.utc) + timedelta(days=settings.retention_days),
+        )
+        db.add(evidence)
+        db.flush()
+        record(db, "evidence.uploaded", user_id=user.id, case_id=case.id,
+               evidence_id=str(evidence.id), sha256=evidence.sha256, **info.as_dict())
+        db.commit()
+    except Exception:
+        db.rollback()
+        storage.delete_file(relative_path)
         raise
     return evidence
 

@@ -31,6 +31,13 @@ class Settings(BaseSettings):
     max_upload_bytes: int = 10_000_000
     worker_poll_seconds: float = 2.0
     preserve_match_images: bool = True  # keep a private copy of each matched image as evidence
+
+    # Video
+    max_video_bytes: int = 100_000_000
+    max_video_seconds: int = 600
+    video_verify_enabled: bool = True
+    video_verify_max_bytes: int = 6_000_000
+    video_verify_max_candidates: int = 6
     scan_dev_targets: list[str] = []  # development only, e.g. ["http://localhost:8001"]
     # Crawler
     crawler_contact: str = "contact-not-configured"
@@ -40,7 +47,7 @@ class Settings(BaseSettings):
     max_html_bytes: int = 3_000_000
     max_image_bytes: int = 3_000_000
     netguard_enabled: bool = True
-    netguard_allow_loopback: bool = False  # development only
+    netguard_allow_loopback: bool = True  # development only
     # Scan limits
     scan_max_pages_per_domain: int = 15
     scan_max_images_per_page: int = 32

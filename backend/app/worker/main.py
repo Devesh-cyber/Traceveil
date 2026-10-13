@@ -29,6 +29,9 @@ from app.crawler.fetcher import Fetcher
 from app.crawler.runner import MatchFound, ScanLimits, ScanProgress, ScanSummary, SiteOutcome, run_scan
 from app.db.session import SessionLocal
 from app.matching.fingerprint import Reference, build_reference, load_image
+from app.video.keyframes import VideoError, extract_keyframes, probe
+from app.video.matcher import KeyframeRef, VideoMatcher
+from app.video.verify import VideoEnricher
 from app.models import DomainResult, EvidenceFile, EvidenceKind, Match, Scan, ScanStatus
 
 log = logging.getLogger("worker")
@@ -77,6 +80,14 @@ def _status_of(scan_id: uuid.UUID) -> ScanStatus | None:
     with SessionLocal() as db:
         scan = db.get(Scan, scan_id)
         return scan.status if scan else None
+
+
+def _merge_stats(scan_id: uuid.UUID, extra: dict) -> None:
+    with SessionLocal() as db:
+        scan = db.get(Scan, scan_id)
+        if scan is not None and scan.status == ScanStatus.running:
+            scan.stats = {**(scan.stats or {}), **extra}
+            db.commit()
 
 
 def _write_progress(scan_id: uuid.UUID, progress: ScanProgress) -> None:
@@ -169,12 +180,25 @@ def _finish(
 
 # ------------------------------------------------------------------ the job itself
 
-def _load_reference(scan_id: uuid.UUID) -> Reference:
+def _build_video_matcher(path) -> tuple[VideoMatcher, dict]:
+    """Pick the frames that represent the user's video and fingerprint each of them."""
+    settings = get_settings()
+    info = probe(path, settings.max_video_seconds)
+    keyframes = extract_keyframes(path, info)
+    refs = [KeyframeRef(k.time_seconds, build_reference(k.image)) for k in keyframes]
+    return VideoMatcher(refs), {"type": "video", "keyframes": len(refs), **info.as_dict()}
+
+
+def _load_reference(scan_id: uuid.UUID):
+    """Returns (what to compare against, a few facts about it for the scan's record).
+    For an image that is a Reference; for a video it is a VideoMatcher."""
     with SessionLocal() as db:
         scan = db.get(Scan, scan_id)
         evidence = db.get(EvidenceFile, scan.evidence_file_id)
-        data = storage.read_bytes(evidence.storage_path)
-    return build_reference(load_image(data))
+        kind, stored = evidence.kind, evidence.storage_path
+    if kind == EvidenceKind.reference_video:
+        return _build_video_matcher(storage.resolve(stored))
+    return build_reference(load_image(storage.read_bytes(stored))), {"type": "image"}
 
 
 def _domains_for_scan() -> list[DomainEntry]:
@@ -215,7 +239,13 @@ async def process_scan(
     fetcher = fetcher or Fetcher()
     progress = ScanProgress()
     try:
-        reference = await asyncio.to_thread(_load_reference, scan_id)
+        try:
+            reference, reference_facts = await asyncio.to_thread(_load_reference, scan_id)
+        except VideoError as exc:
+            _finish(scan_id, ScanStatus.failed, error=f"The reference video could not be used: {exc}")
+            return
+        _merge_stats(scan_id, {"reference": reference_facts})
+        enrich = VideoEnricher(fetcher, reference) if isinstance(reference, VideoMatcher) else None
         entries = domains if domains is not None else _domains_for_scan()
         if not entries:
             _finish(scan_id, ScanStatus.failed,
@@ -230,7 +260,7 @@ async def process_scan(
 
         task = asyncio.create_task(run_scan(
             entries, reference, fetcher, limits or ScanLimits.from_settings(),
-            progress=progress, on_match=on_match, on_site_done=on_site_done,
+            progress=progress, on_match=on_match, on_site_done=on_site_done, enrich=enrich,
         ))
         cancelled = False
         while not task.done():

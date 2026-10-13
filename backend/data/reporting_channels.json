@@ -1,0 +1,37 @@
+{
+  "note": "Written by the developers from general knowledge and NOT yet checked. Before relying on an entry, open the link, confirm what it says, and fill in last_checked.",
+  "channels": [
+    {
+      "id": "ncrp",
+      "name": "National Cybercrime Reporting Portal (India)",
+      "url": "https://cybercrime.gov.in",
+      "what": "The official Government of India portal for reporting cybercrime, including sexually explicit content shared without consent.",
+      "who_decides": "You. Traceveil never files a report for you.",
+      "last_checked": null
+    },
+    {
+      "id": "stopncii",
+      "name": "StopNCII.org",
+      "url": "https://stopncii.org",
+      "what": "Turns an intimate image or video into a fingerprint on your own device, and shares only that fingerprint with participating platforms so they can block it. Intended for adults.",
+      "who_decides": "You.",
+      "last_checked": null
+    },
+    {
+      "id": "grievance_officer",
+      "name": "The platform's own grievance officer",
+      "url": null,
+      "what": "Larger platforms that operate in India are expected to publish a grievance officer and a complaint process. Look in the site's footer, help centre or terms.",
+      "who_decides": "You.",
+      "last_checked": null
+    },
+    {
+      "id": "police_or_lawyer",
+      "name": "Your local police station or a lawyer",
+      "url": null,
+      "what": "If the content stays online, or you are being threatened, a police complaint and legal advice are the next step. Take the evidence report with you.",
+      "who_decides": "You.",
+      "last_checked": null
+    }
+  ]
+}

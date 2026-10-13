@@ -27,7 +27,7 @@ def start_scan(
         select(EvidenceFile).where(
             EvidenceFile.id == payload.evidence_id,
             EvidenceFile.case_id == case.id,
-            EvidenceFile.kind == EvidenceKind.reference_image,
+            EvidenceFile.kind.in_([EvidenceKind.reference_image, EvidenceKind.reference_video]),
         )
     )
     if evidence is None:

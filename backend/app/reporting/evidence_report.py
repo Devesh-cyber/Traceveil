@@ -15,7 +15,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models import (
-    AuditLog, Case, DomainResult, EvidenceFile, EvidenceKind, Match, ReviewStatus, Scan,
+    AuditLog, Case, DomainResult, EvidenceFile, EvidenceKind, Match, ReviewStatus, Scan, TakedownRequest,
 )
 
 REPORT_VERSION = "1"
@@ -52,7 +52,7 @@ def verify_digest(report: dict) -> bool:
 
 def build_case_report(db: Session, case: Case, *, include_potential: bool = False) -> dict:
     references = list(db.scalars(
-        select(EvidenceFile).where(EvidenceFile.case_id == case.id, EvidenceFile.kind == EvidenceKind.reference_image)
+        select(EvidenceFile).where(EvidenceFile.case_id == case.id, EvidenceFile.kind.in_([EvidenceKind.reference_image, EvidenceKind.reference_video]))
         .order_by(EvidenceFile.created_at)
     ))
     scans = list(db.scalars(select(Scan).where(Scan.case_id == case.id).order_by(Scan.created_at)))
@@ -103,6 +103,16 @@ def build_case_report(db: Session, case: Case, *, include_potential: bool = Fals
                 },
             })
 
+    takedowns = [
+        {
+            "id": str(t.id), "domain": t.domain, "contact": t.contact,
+            "contact_verified": t.contact_verified, "subject": t.subject,
+            "status": t.status.value, "sent_at": _iso(t.sent_at), "sent_via": t.sent_via,
+            "response_note": t.response_note, "history": t.history or [],
+        }
+        for t in db.scalars(select(TakedownRequest).where(TakedownRequest.case_id == case.id).order_by(TakedownRequest.created_at))
+    ]
+
     audit = []
     for row in db.scalars(select(AuditLog).where(AuditLog.case_id == case.id).order_by(AuditLog.created_at).limit(1000)):
         audit.append({
@@ -119,13 +129,15 @@ def build_case_report(db: Session, case: Case, *, include_potential: bool = Fals
         "case": {"id": str(case.id), "title": case.title, "description": case.description,
                  "created_at": _iso(case.created_at)},
         "reference_files": [
-            {"id": str(r.id), "filename": r.original_filename, "sha256": r.sha256,
+            {"id": str(r.id), "type": "video" if r.kind == EvidenceKind.reference_video else "image",
+             "filename": r.original_filename, "sha256": r.sha256,
              "size_bytes": r.size_bytes, "uploaded_at": _iso(r.created_at)}
             for r in references
         ],
         "scans": scan_entries,
         "finding_counts": counts,
         "findings": findings,
+        "takedown_requests": takedowns,
         "audit_trail": audit,
     }
     return {**body, "integrity": {
@@ -149,7 +161,7 @@ def render_markdown(report: dict) -> str:
 
     lines += ["## Reference files", ""]
     for r in report["reference_files"] or []:
-        lines.append(f"- {r['filename']}: SHA-256 `{r['sha256']}`, {r['size_bytes']} bytes, uploaded {r['uploaded_at']}")
+        lines.append(f"- {r['filename']} ({r['type']}): SHA-256 `{r['sha256']}`, {r['size_bytes']} bytes, uploaded {r['uploaded_at']}")
     if not report["reference_files"]:
         lines.append("- none")
 
@@ -192,6 +204,17 @@ def render_markdown(report: dict) -> str:
         )
         lines.append("")
 
+    lines += ["## Takedown requests", ""]
+    for t in report["takedown_requests"]:
+        sent = f", sent {t['sent_at']} via {t['sent_via']}" if t["sent_at"] else ""
+        lines.append(f"- {t['domain']}: {t['status']}{sent} (contact: {t['contact'] or 'none'}, "
+                     f"{'verified' if t['contact_verified'] else 'not verified'})")
+        for step in t["history"]:
+            note = f": {step['note']}" if step.get("note") else ""
+            lines.append(f"  - {step['at']} {step['from'] or 'start'} -> {step['to']}{note}")
+    if not report["takedown_requests"]:
+        lines.append("- none")
+    lines.append("")
     lines += ["## Audit trail", ""]
     for a in report["audit_trail"]:
         extra = f" {a['detail']}" if a["detail"] else ""
