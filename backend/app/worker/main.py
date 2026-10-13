@@ -10,13 +10,15 @@ show real progress, and a restart never loses track of a scan.
 from __future__ import annotations
 
 import asyncio
+import io
 import logging
 import signal
 import uuid
 from dataclasses import asdict
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from urllib.parse import urlsplit
 
+from PIL import Image
 from sqlalchemy import select
 
 from app.core import storage
@@ -27,7 +29,7 @@ from app.crawler.fetcher import Fetcher
 from app.crawler.runner import MatchFound, ScanLimits, ScanProgress, ScanSummary, SiteOutcome, run_scan
 from app.db.session import SessionLocal
 from app.matching.fingerprint import Reference, build_reference, load_image
-from app.models import DomainResult, EvidenceFile, Match, Scan, ScanStatus
+from app.models import DomainResult, EvidenceFile, EvidenceKind, Match, Scan, ScanStatus
 
 log = logging.getLogger("worker")
 PROGRESS_SECONDS = 2.0
@@ -95,13 +97,46 @@ def _save_site(scan_id: uuid.UUID, outcome: SiteOutcome) -> None:
         db.commit()
 
 
+CONTENT_TYPES = {"JPEG": "image/jpeg", "PNG": "image/png", "WEBP": "image/webp"}
+
+
+def _preserve_copy(db, case_id: uuid.UUID, found: MatchFound) -> uuid.UUID | None:
+    """Keep a private copy of the matched picture as evidence. The page may be taken down
+    or changed later, and a takedown request is much stronger with proof of what was there."""
+    if not found.image_bytes:
+        return None
+    try:
+        content_type = CONTENT_TYPES.get(Image.open(io.BytesIO(found.image_bytes)).format or "")
+    except Exception:
+        return None
+    if content_type is None:
+        return None
+    relative_path, digest = storage.save_bytes(case_id, found.image_bytes)
+    name = found.image_url.split("?")[0].rsplit("/", 1)[-1][:200] or "matched-image"
+    evidence = EvidenceFile(
+        case_id=case_id, kind=EvidenceKind.supporting, original_filename=name,
+        content_type=content_type, size_bytes=len(found.image_bytes), sha256=digest,
+        storage_path=relative_path,
+        delete_after=_now() + timedelta(days=get_settings().retention_days),
+    )
+    db.add(evidence)
+    db.flush()
+    return evidence.id
+
+
 def _save_match(scan_id: uuid.UUID, found: MatchFound) -> None:
     with SessionLocal() as db:
+        scan = db.get(Scan, scan_id)
+        snapshot_id = None
+        if get_settings().preserve_match_images:
+            snapshot_id = _preserve_copy(db, scan.case_id, found)
         db.add(Match(
             scan_id=scan_id, domain=found.domain,
             source_page_url=found.source_page_url, image_url=found.image_url,
             kind=found.decision.kind,
-            signals={**found.decision.signals, "variant": found.decision.variant},
+            signals={**found.decision.signals, "variant": found.decision.variant,
+                     "collected_at": found.collected_at.isoformat()},
+            snapshot_id=snapshot_id,
         ))
         db.commit()
 

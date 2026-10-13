@@ -20,6 +20,7 @@ class ReviewStatus(str, enum.Enum):
     potential = "potential"  # found by the machine only
     reviewed = "reviewed"    # a person looked at it
     verified = "verified"    # a person confirmed it with evidence
+    dismissed = "dismissed"  # a person decided it is a false alarm
 
 
 class Match(IdMixin, CreatedAtMixin, Base):
@@ -43,5 +44,14 @@ class Match(IdMixin, CreatedAtMixin, Base):
         ForeignKey("users.id", ondelete="SET NULL"), default=None
     )
     reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+    review_note: Mapped[str | None] = mapped_column(Text, default=None)
+    # A private copy of the matched image, kept as evidence (an evidence_files row)
+    snapshot_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("evidence_files.id", ondelete="SET NULL"), default=None
+    )
 
     scan: Mapped["Scan"] = relationship(back_populates="matches")  # noqa: F821
+
+    @property
+    def has_snapshot(self) -> bool:
+        return self.snapshot_id is not None

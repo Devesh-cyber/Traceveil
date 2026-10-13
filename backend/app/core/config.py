@@ -30,6 +30,7 @@ class Settings(BaseSettings):
     retention_days: int = 7
     max_upload_bytes: int = 10_000_000
     worker_poll_seconds: float = 2.0
+    preserve_match_images: bool = True  # keep a private copy of each matched image as evidence
     scan_dev_targets: list[str] = []  # development only, e.g. ["http://localhost:8001"]
     # Crawler
     crawler_contact: str = "contact-not-configured"

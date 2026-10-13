@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.core.security import decode_access_token
 from app.db.session import get_db
-from app.models import Case, User, Scan
+from app.models import Case, Match, Scan, User
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login")
 
@@ -56,3 +56,19 @@ def get_owned_scan(
     if scan is None:
         raise HTTPException(status_code=404, detail="Scan not found.")
     return scan
+
+def get_owned_match(
+    match_id: uuid.UUID,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> Match:
+    """Return the match only if its case belongs to the logged-in user (else a plain 404)."""
+    match = db.scalar(
+        select(Match)
+        .join(Scan, Scan.id == Match.scan_id)
+        .join(Case, Case.id == Scan.case_id)
+        .where(Match.id == match_id, Case.owner_id == user.id)
+    )
+    if match is None:
+        raise HTTPException(status_code=404, detail="Match not found.")
+    return match

@@ -12,6 +12,7 @@ import logging
 import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 
 from app.core.config import get_settings
 from app.crawler.assets import extract_image_urls
@@ -95,6 +96,8 @@ class MatchFound:
     source_page_url: str
     image_url: str
     decision: MatchDecision
+    image_bytes: bytes | None = None  # the matched picture exactly as we downloaded it
+    collected_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 @dataclass
@@ -206,11 +209,14 @@ async def scan_domain(
             outcome.images_compared += 1
             progress.images_compared += 1
             if decision:
-                found = MatchFound(entry.domain, page_url, image_url, decision)
+                found = MatchFound(
+                    entry.domain, page_url, image_url, decision, image_bytes=picture.body
+                )
                 outcome.matches.append(found)
                 progress.matches_found += 1
                 if on_match:
                     await on_match(found)
+                    found.image_bytes = None  # saved by the callback; do not hold it in memory
         if stopped_early:
             break
 
