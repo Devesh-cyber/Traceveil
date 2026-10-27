@@ -49,8 +49,8 @@ class Settings(BaseSettings):
     netguard_enabled: bool = True
     netguard_allow_loopback: bool = True  # development only
     # Scan limits
-    scan_max_pages_per_domain: int = 15
-    scan_max_images_per_page: int = 32
+    scan_max_pages_per_domain: int = 5
+    scan_max_images_per_page: int = 40
     scan_max_total_images: int = 8000
     scan_max_seconds: int = 600
     scan_parallel_domains: int = 6

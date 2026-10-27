@@ -3,3 +3,4 @@
 # abuse_email and/or report_url (https only). source_url = the page that shows the contact.
 # A contact counts as VERIFIED only if both source_url and verified_on (YYYY-MM-DD) are filled in.
 domain,abuse_email,report_url,source_url,verified_on,notes
+desi-xnxx.pro,copyright@desi-xnxx.pro,,,,

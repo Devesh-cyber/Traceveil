@@ -89,13 +89,19 @@ def extract_image_urls(html: str, page_url: str, limit: int) -> list[str]:
         add(tag.get("poster"))
 
     # 3. <img> in all its disguises
+    # One address per <img>: a tile often lists a tiny placeholder in src, a real picture in data-src
+    # and several sizes in srcset. Counting each of those would use up the per-page limit after only a
+    # third of the tiles, and pictures further down the page would never be looked at.
     for tag in soup.find_all("img"):
         if _declared_tiny(tag):
             continue
-        for attribute in SRCSET_ATTRIBUTES:
-            add(_best_from_srcset(tag.get(attribute)))
-        for attribute in LAZY_ATTRIBUTES:
-            add(tag.get(attribute))
+        candidates = [_best_from_srcset(tag.get(a)) for a in ("data-srcset", "srcset")]
+        candidates += [tag.get(a) for a in ("data-src", "data-original", "data-lazy-src", "data-lazy", "data-img", "src")]
+        for raw in candidates:
+            url = clean_url(raw, page_url)
+            if url:
+                add(url)
+                break
 
     # 4. <picture><source srcset=...>
     for tag in soup.find_all("source"):
